@@ -1,0 +1,29 @@
+{
+  "name": "cordova-plugin-onestore",
+  "version": "0.1.0",
+  "description": "",
+  "cordova": {
+    "id": "cordova-plugin-onestore",
+    "platforms": [
+      "android"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/but0n/cordova-plugin-onestore.git"
+  },
+  "keywords": [
+    "cordova",
+    "plugin",
+    "onestore",
+    "purchase",
+    "ecosystem:cordova",
+    "cordova-android"
+  ],
+  "author": "but0n",
+  "license": "Apache-2",
+  "bugs": {
+    "url": "https://github.com/but0n/cordova-plugin-onestore/issues"
+  },
+  "homepage": "https://github.com/but0n/cordova-plugin-onestore#readme"
+}
