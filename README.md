@@ -6,7 +6,7 @@
 cordova plugin add cordova-plugin-onestore
 ```
 
-You need manually replace the PUBLIC_KEY in `src/android/Hello.java` with your application's public key. (PR is welcome!)
+You need manually replace the PUBLIC_KEY in `src/android/Hello.java` with your application's public key. (PR is welcome if you know the other way!)
 
 ## Usage
 
