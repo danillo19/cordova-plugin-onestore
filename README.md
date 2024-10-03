@@ -6,13 +6,11 @@
 cordova plugin add cordova-plugin-onestore
 ```
 
-You need manually replace the PUBLIC_KEY in `src/android/Hello.java` with your application's public key. (PR is welcome if you know other way!)
-
 ## Usage
 
 Initialization
 ```js
-hello.init(
+onestore_plugin.init(
     () => {alert('init success')},
     e => {alert('init failed: ' + e)}
 )
@@ -20,7 +18,7 @@ hello.init(
 
 Purchase
 ```js
-hello.purchase(
+onestore_plugin.purchase(
     'uid',
     'pid',
     data => {
