@@ -8,21 +8,21 @@
     <engine name="cordova" version=">=3.4.0"/>
   </engines>
 
-  <asset src="www/hello.js" target="js/hello.js"/>
+  <asset src="www/onestore_plugin.js" target="js/onestore_plugin.js"/>
 
-  <js-module src="www/hello.js" name="hello">
-    <clobbers target="hello" />
+  <js-module src="www/onestore_plugin.js" name="onestore_plugin">
+    <clobbers target="onestore_plugin" />
   </js-module>
 
   <platform name="android">
 
     <config-file target="res/xml/config.xml" parent="/*">
-      <feature name="Hello">
-        <param name="android-package" value="com.example.plugin.Hello"/>
+      <feature name="OneStorePlugin">
+        <param name="android-package" value="com.example.plugin.OneStorePlugin"/>
       </feature>
     </config-file>
 
-    <source-file src="src/android/Hello.java" target-dir="src/com/example/plugin/"/>
+    <source-file src="src/android/OneStorePlugin.java" target-dir="src/com/example/plugin/"/>
     <source-file src="src/android/iap_plugin_v17.02.00_20181012.jar" target-dir="libs" />
   </platform>
 

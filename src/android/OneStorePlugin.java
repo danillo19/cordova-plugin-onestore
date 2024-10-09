@@ -20,7 +20,7 @@ import java.util.Random;
 
 
 
-public class Hello extends CordovaPlugin {
+public class OneStorePlugin extends CordovaPlugin {
     private CallbackContext context;
 
     PurchaseClient mPurchaseClient = null;
@@ -58,7 +58,6 @@ public class Hello extends CordovaPlugin {
         StringBuilder randomString = new StringBuilder();
         Random random = new Random();
 
-        //length : 20자
         for (int i = 0; i < 20; i++) {
             randomString.append(payload[random.nextInt(payload.length)]);
         }
@@ -71,12 +70,12 @@ public class Hello extends CordovaPlugin {
         mAct = this.cordova.getActivity();
     }
 
-    public void init(CallbackContext callbackContext) {
+    public void init((String publicKey, CallbackContext callbackContext) {
         if(mPurchaseClient == null) {
             getAct();
-            String PUBLIC_KEY = "PUBLIC_KEY";
-            mPurchaseClient = new PurchaseClient(mAct, PUBLIC_KEY);
+            mPurchaseClient = new PurchaseClient(mAct, publicKey);
         }
+
         mPurchaseClient.connect(new PurchaseClient.ServiceConnectionListener() {
             @Override
             public void onConnected() {
