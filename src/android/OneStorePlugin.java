@@ -70,7 +70,7 @@ public class OneStorePlugin extends CordovaPlugin {
         mAct = this.cordova.getActivity();
     }
 
-    public void init((String publicKey, CallbackContext callbackContext) {
+    public void init(String publicKey, CallbackContext callbackContext) {
         if(mPurchaseClient == null) {
             getAct();
             mPurchaseClient = new PurchaseClient(mAct, publicKey);
@@ -217,7 +217,8 @@ public class OneStorePlugin extends CordovaPlugin {
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
         this.context = callbackContext;
         if(action.equals("init")) {
-            init(callbackContext);
+            String publicKey = args.getString(0);
+            init(publicKey, callbackContext);
             return true;
         } else if(action.equals("purchase")) {
             String uid = args.getString(0);
