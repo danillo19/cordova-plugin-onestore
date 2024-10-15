@@ -23,10 +23,9 @@
 
     <source-file src="src/android/OneStorePlugin.java" target-dir="src/com/example/plugin/"/>
 
+    <framework src="com.onestorecorp.sdk:sdk-iap:21.01.00" />
 
-    <!--<framework src="com.onestorecorp.sdk:sdk-iap:21.01.00" />-->
-
-    <!--<framework src="src/android/plugin.gradle" custom="true" type="gradleReference"/>-->
+    <framework src="src/android/plugin.gradle" custom="true" type="gradleReference"/>
 
   </platform>
 

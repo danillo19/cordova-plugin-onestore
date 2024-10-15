@@ -1,0 +1,3 @@
+repositories {
+    maven { url 'https://repo.onestore.net/repository/onestore-sdk-public' }
+}
