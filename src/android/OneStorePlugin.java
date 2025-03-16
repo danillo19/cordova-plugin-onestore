@@ -3,10 +3,11 @@ package com.example.plugin;
 import android.app.Activity;
 import android.util.Log;
 
-import androidx.annotation.Nullable;
+import androidx.annotation.NonNull;
 
-import com.gaa.sdk.iap.AcknowledgeListener;
-import com.gaa.sdk.iap.AcknowledgeParams;
+import com.gaa.sdk.auth.GaaSignInClient;
+import com.gaa.sdk.auth.OnAuthListener;
+import com.gaa.sdk.auth.SignInResult;
 import com.gaa.sdk.iap.ConsumeListener;
 import com.gaa.sdk.iap.ConsumeParams;
 import com.gaa.sdk.iap.IapResult;
@@ -16,8 +17,12 @@ import com.gaa.sdk.iap.PurchaseClient.ProductType;
 import com.gaa.sdk.iap.PurchaseClientStateListener;
 import com.gaa.sdk.iap.PurchaseData;
 import com.gaa.sdk.iap.PurchaseFlowParams;
-import com.gaa.sdk.iap.PurchasesListener;
 import com.gaa.sdk.iap.PurchasesUpdatedListener;
+import com.gaa.sdk.iap.QueryPurchasesListener;
+import com.gaa.sdk.iap.Security;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -25,127 +30,74 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 import java.util.List;
-import java.util.Random;
+import java.util.Locale;
 
+enum PluginAction {
+    INIT,
+    PURCHASE,
+    CONSUME,
+    GET_PURCHASES,
+}
 
 public class OneStorePlugin extends CordovaPlugin {
-    private CallbackContext context;
-
     PurchaseClient mPurchaseClient = null;
     ConsumeListener mConsumeListener = null;
     String TAG = "ONESTORE_TEST";
 
+    String publicKey = "";
+
     Activity mAct;
 
-    CallbackContext cbScope;
+    private CallbackContext purchaseContext;
+    private CallbackContext consumeContext;
+    private CallbackContext initContext;
 
-    public String generatePayload() {
-        char[] payload;
-        final char[] specials = {'~', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '-', '{', '}', '|', '\\', '/', '.',
-                '.', '=', '[', ']', '?', '<', '>'};
-        StringBuilder buffer = new StringBuilder();
-        for (char ch = '0'; ch <= '9'; ++ch) {
-            buffer.append(ch);
-        }
-        for (char ch = 'a'; ch <= 'z'; ++ch) {
-            buffer.append(ch);
-        }
-        for (char ch = 'A'; ch <= 'Z'; ++ch) {
-            buffer.append(ch);
-        }
-
-        for (char ch : specials) {
-            buffer.append(ch);
-        }
-
-        payload = buffer.toString().toCharArray();
-
-        StringBuilder randomString = new StringBuilder();
-        Random random = new Random();
-
-        for (int i = 0; i < 20; i++) {
-            randomString.append(payload[random.nextInt(payload.length)]);
-        }
-
-        return randomString.toString();
-    }
+    private CallbackContext loadPurchasesContext;
 
     public void getAct() {
         cordova.setActivityResultCallback(this); // Required
         mAct = this.cordova.getActivity();
     }
 
-    public void init(String publicKey, CallbackContext callbackContext) {
-        if (mPurchaseClient == null) {
-            getAct();
+    public void init(String pk, CallbackContext callbackContext) {
+        initContext = callbackContext;
 
-            mPurchaseClient = PurchaseClient.newBuilder(mAct).setBase64PublicKey(publicKey).setListener(new PurchasesUpdatedListener() {
-                @Override
-                public void onPurchasesUpdated(IapResult iapResult, @Nullable List<PurchaseData> purchases) {
-                    if (iapResult.isSuccess() && purchases != null) {
-                        for (PurchaseData purchase : purchases) {
-                            Log.d(TAG, "successful onPurchasesUpdated; product: " + purchase.getProductId());
-                            consumeItem(purchase);
-                        }
-                    } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_UPDATE) {
-                        mPurchaseClient.launchUpdateOrInstallFlow(mAct, new IapResultListener() {
-                            @Override
-                            public void onResponse(IapResult iapResult) {
-                                if (iapResult.isSuccess()) {
-                                    Log.i(TAG, "launchUpdateOrInstallFlow was successful");
-                                    mPurchaseClient.startConnection(new PurchaseClientStateListener() {
-                                        @Override
-                                        public void onSetupFinished(IapResult iapResult) {
-                                            if (iapResult.isSuccess()) {
-                                                loadPurchases();
-                                            }
-                                        }
+        publicKey = pk;
 
-                                        @Override
-                                        public void onServiceDisconnected() {
-                                            Log.e(TAG, "ONE store service disconnected!");
-                                        }
-                                    });
-                                } else {
-                                    Log.i(TAG, "launchUpdateOrInstallFlow failed: " + iapResult.getMessage() + " ;code: " + iapResult.getResponseCode());
-                                }
-                            }
-                        });
-                    } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_LOGIN) {
-                        mPurchaseClient.launchLoginFlowAsync(mAct,
-                                iap -> Log.d(TAG, "onResponse of IapResultListener: " + iap.getMessage() + " ;code: " + iap.getResponseCode()));
-                    } else {
-                        Log.e(TAG, "one store onPurchasesUpdate response msg: " + iapResult.getMessage() + "; code: " + iapResult.getResponseCode());
-                    }
-                }
-            }).build();
-        }
-
-        mConsumeListener = (iapResult, purchaseData) -> {
-            Log.d(TAG, "TODO consumeAsync onSuccess, " + purchaseData.toString());
-            if (cbScope != null) {
-                cbScope.success(purchaseData.toString());
-                cbScope = null;
-            }
-        };
-
-        mPurchaseClient.startConnection(new PurchaseClientStateListener() {
+        PurchaseClientStateListener purchaseClientStateListener = new PurchaseClientStateListener() {
             @Override
             public void onSetupFinished(IapResult iapResult) {
                 if (iapResult.isSuccess()) {
-                    loadPurchases();
+                    //loadPurchases();
+                    if (initContext != null) {
+                        initContext.success(0);
+                        initContext = null;
+                    }
                 } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_UPDATE) {
                     mPurchaseClient.launchUpdateOrInstallFlow(mAct, null);
                 } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_LOGIN) {
-                    mPurchaseClient.launchLoginFlowAsync(mAct, new IapResultListener() {
+                    if (initContext != null) {
+                        initContext.success(iapResult.getResponseCode());
+                        initContext = null;
+                    }
+
+                    getAct();
+                    GaaSignInClient signInClient = GaaSignInClient.getClient(mAct);
+                    signInClient.launchSignInFlow(mAct, new OnAuthListener() {
                         @Override
-                        public void onResponse(IapResult iapResult) {
-                            Log.i(TAG, iapResult.getMessage());
+                        public void onResponse(@NonNull SignInResult signInResult) {
+                            int code = signInResult.getCode();
+                            String message = signInResult.getMessage();
+                            Log.i(TAG, "Code: " + code + "; Message: " + message);
                         }
                     });
+
                 } else {
                     Log.e(TAG, "Code: " + iapResult.getResponseCode() + "; msg: " + iapResult.getMessage());
-                    
+                    if (initContext != null) {
+                        initContext.error(iapResult.getMessage());
+                        initContext = null;
+                    }
                 }
             }
 
@@ -153,56 +105,170 @@ public class OneStorePlugin extends CordovaPlugin {
             public void onServiceDisconnected() {
                 Log.e(TAG, "ONE store service disconnected!");
             }
+        };
+
+        IapResultListener updateOrInstallFlowListener = new IapResultListener() {
+            @Override
+            public void onResponse(IapResult iapResult) {
+                if (iapResult.isSuccess()) {
+                    Log.i(TAG, "launchUpdateOrInstallFlow was successful");
+                    mPurchaseClient.startConnection(purchaseClientStateListener);
+                } else {
+                    Log.i(TAG, "launchUpdateOrInstallFlow failed: " + iapResult.getMessage() + " ;code: " + iapResult.getResponseCode());
+                }
+            }
+        };
+
+
+        PurchasesUpdatedListener purchasesUpdatedListener = new PurchasesUpdatedListener() {
+            @Override
+            public void onPurchasesUpdated(IapResult iapResult, List<PurchaseData> purchases) {
+                if (iapResult.isSuccess() && purchases != null) {
+                    for (PurchaseData purchase : purchases) {
+                        Log.d(TAG, "successful onPurchasesUpdated; product: " + purchase.getProductId());
+                        //consumeItem(purchase);
+
+                        if (purchaseContext != null) {
+                            boolean isValidPurchase = Security.verifyPurchase(publicKey, purchase.getOriginalJson(), purchase.getSignature());
+
+                            if (!isValidPurchase) {
+                                purchaseContext.error("invalid purchase");
+                                purchaseContext = null;
+                                return;
+                            }
+
+                            purchaseContext.success(purchase.getOriginalJson());
+                            purchaseContext = null;
+                        }
+                    }
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_UPDATE) {
+                    mPurchaseClient.launchUpdateOrInstallFlow(mAct, updateOrInstallFlowListener);
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_LOGIN) {
+                    mPurchaseClient.launchLoginFlowAsync(mAct,
+                            iap -> Log.d(TAG, "onResponse of IapResultListener: " + iap.getMessage() + " ;code: " + iap.getResponseCode()));
+                } else {
+                    Log.e(TAG, "one store onPurchasesUpdate response msg: " + iapResult.getMessage() + "; code: " + iapResult.getResponseCode());
+                }
+
+
+                if (purchaseContext != null) {
+                    purchaseContext.error("error:" + iapResult.getMessage());
+                    purchaseContext = null;
+                }
+            }
+        };
+
+
+        if (mPurchaseClient == null) {
+            getAct();
+
+            mPurchaseClient = PurchaseClient.newBuilder(mAct).setBase64PublicKey(publicKey).setListener(purchasesUpdatedListener).build();
+        }
+
+
+
+        mConsumeListener = (iapResult, purchaseData) -> {
+            if (iapResult.isFailure()) {
+                if (consumeContext != null) {
+                    consumeContext.error(iapResult.getMessage());
+                    consumeContext = null;
+                }
+                return;
+            }
+
+            Log.d(TAG, "TODO consumeAsync onSuccess, " + purchaseData.toString());
+            if (consumeContext != null) {
+                String test = purchaseData.getOriginalJson();
+                consumeContext.success(test);
+                consumeContext = null;
+            }
+
+        };
+
+        mPurchaseClient.startConnection(purchaseClientStateListener);
+    }
+
+    public void purchase(String purchasePayload, String productId, CallbackContext callbackContext) {
+        purchaseContext = callbackContext;
+
+        cordova.getActivity().runOnUiThread(() -> {
+            PurchaseFlowParams purchaseFlowParams = PurchaseFlowParams.newBuilder()
+                    .setProductType(ProductType.INAPP)
+                    .setProductId(productId)
+                    .setDeveloperPayload(purchasePayload)
+                    .setQuantity(1)
+                    .build();
+
+            mPurchaseClient.launchPurchaseFlow(cordova.getActivity(), purchaseFlowParams);
         });
     }
 
-    public void purchase(String userID, String productId, CallbackContext callbackContext) {
-        cbScope = callbackContext;
-        getAct();
+    public void consume(String rawPurchasesData, CallbackContext callbackContext) {
+        consumeContext = callbackContext;
 
-        PurchaseFlowParams purchaseFlowParams = PurchaseFlowParams.newBuilder()
-                .setProductId(productId)
-                .setDeveloperPayload(generatePayload())
-                .setQuantity(1)
-                .setGameUserId(userID)
-                .build();
+        PurchaseData purchaseData = new PurchaseData(rawPurchasesData);
 
-        mPurchaseClient.launchPurchaseFlow(mAct, purchaseFlowParams);
+        consumeItem(purchaseData);
     }
 
     @Override
-    public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-        this.context = callbackContext;
-        if (action.equals("init")) {
-            String publicKey = args.getString(0);
-            init(publicKey, callbackContext);
-            return true;
-        } else if (action.equals("purchase")) {
-            String uid = args.getString(0);
-            String pid = args.getString(1);
-            purchase(uid, pid, callbackContext);
-            return true;
-        } else {
+    public boolean execute(String actionStr, JSONArray args, CallbackContext callbackContext) throws JSONException {
+        try {
+            PluginAction action = PluginAction.valueOf(actionStr.toUpperCase(Locale.ENGLISH));
 
+            switch (action) {
+                case INIT: {
+                    String publicKey = args.getString(0);
+                    init(publicKey, callbackContext);
+                    return true;
+                }
+                case PURCHASE: {
+                    String purchasePayload = args.getString(0);
+                    String productId = args.getString(1);
+
+                    purchase(purchasePayload, productId, callbackContext);
+                    return true;
+                }
+                case CONSUME: {
+                    String purchaseData = args.getString(0);
+                    consume(purchaseData, callbackContext);
+                    return true;
+                }
+                case GET_PURCHASES:
+                    loadPurchases(callbackContext);
+                    return true;
+            }
+        } catch (IllegalArgumentException ex) {
+            callbackContext.error("unsupported action: " + actionStr);
             return false;
-
         }
 
+        return false;
     }
 
-    private void loadPurchases() {
-        Log.d("ONESTORE_TEST", "loadPurchases()");
-        loadPurchase(ProductType.AUTO);
+    private void loadPurchases(CallbackContext callbackContext) {
+        loadPurchasesContext = callbackContext;
+
+        Log.d(TAG, "loadPurchases()");
         loadPurchase(ProductType.INAPP);
     }
 
     private void onLoadPurchaseInApp(List<PurchaseData> purchaseDataList) {
         Log.i(TAG, "onLoadPurchaseInApp() :: purchaseDataList - " + purchaseDataList.toString());
-        ;
+
+        JsonArray purchasesToSync = new JsonArray();
 
         for (PurchaseData purchaseData : purchaseDataList) {
-            //boolean result = AppSecurity.verifyPurchase(purchaseData.g(), purchase.getSignature());
-            consumeItem(purchaseData);
+            if (purchaseData.getPurchaseState() == PurchaseData.PurchaseState.PURCHASED) {
+                JsonObject parsed = JsonParser.parseString(purchaseData.getOriginalJson()).getAsJsonObject();
+                purchasesToSync.add(parsed);
+            }
+        }
+
+        if (loadPurchasesContext != null) {
+            String output = purchasesToSync.toString();
+            loadPurchasesContext.success(output);
+            loadPurchasesContext = null;
         }
     }
 
@@ -222,7 +288,7 @@ public class OneStorePlugin extends CordovaPlugin {
         mPurchaseClient.consumeAsync(consumeParams, mConsumeListener);
     }
 
-    PurchasesListener mQueryPurchaseListener = (iapResult, list) -> {
+    QueryPurchasesListener mQueryPurchaseListener = (iapResult, list) -> {
         if (iapResult.isFailure()) {
             Log.d(TAG, "onPurchasesResponse failed: " + iapResult.getMessage());
             return;
@@ -239,26 +305,8 @@ public class OneStorePlugin extends CordovaPlugin {
 
     private void loadPurchase(String productType) {
         Log.i(TAG, "loadPurchase() :: productType - " + productType);
+
         mPurchaseClient.queryPurchasesAsync(productType, mQueryPurchaseListener);
     }
-
-    private void handlePurchase(PurchaseData purchase) {
-        if (purchase.getPurchaseState() == PurchaseData.PurchaseState.PURCHASED) {
-            if (!purchase.isAcknowledged()) {
-                AcknowledgeParams acknowledgeParams = AcknowledgeParams.newBuilder()
-                        .setPurchaseData(purchase)
-                        .build();
-
-                mPurchaseClient.acknowledgeAsync(acknowledgeParams, new AcknowledgeListener() {
-                    @Override
-                    public void onAcknowledgeResponse(IapResult iapResult, PurchaseData purchaseData) {
-                        Log.d(TAG, "onAcknowledgeResponse response: " + iapResult.getMessage());
-
-                    }
-                });
-            }
-        }
-    }
-
 
 }
