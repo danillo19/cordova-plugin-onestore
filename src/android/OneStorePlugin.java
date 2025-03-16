@@ -1,382 +1,312 @@
 package com.example.plugin;
 
-import org.apache.cordova.*;
-import org.json.JSONArray;
-import org.json.JSONException;
-
-import com.onestore.iap.api.IapEnum;
-import com.onestore.iap.api.IapResult;
-import com.onestore.iap.api.ProductDetail;
-import com.onestore.iap.api.PurchaseClient;
-import com.onestore.iap.api.PurchaseData;
-import java.util.ArrayList;
-import java.util.List;
-
-import android.content.Intent;
 import android.app.Activity;
 import android.util.Log;
 
-import java.util.Random;
+import androidx.annotation.NonNull;
 
+import com.gaa.sdk.auth.GaaSignInClient;
+import com.gaa.sdk.auth.OnAuthListener;
+import com.gaa.sdk.auth.SignInResult;
+import com.gaa.sdk.iap.ConsumeListener;
+import com.gaa.sdk.iap.ConsumeParams;
+import com.gaa.sdk.iap.IapResult;
+import com.gaa.sdk.iap.IapResultListener;
+import com.gaa.sdk.iap.PurchaseClient;
+import com.gaa.sdk.iap.PurchaseClient.ProductType;
+import com.gaa.sdk.iap.PurchaseClientStateListener;
+import com.gaa.sdk.iap.PurchaseData;
+import com.gaa.sdk.iap.PurchaseFlowParams;
+import com.gaa.sdk.iap.PurchasesUpdatedListener;
+import com.gaa.sdk.iap.QueryPurchasesListener;
+import com.gaa.sdk.iap.Security;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
+import org.apache.cordova.CallbackContext;
+import org.apache.cordova.CordovaPlugin;
+import org.json.JSONArray;
+import org.json.JSONException;
+
+import java.util.List;
+import java.util.Locale;
+
+enum PluginAction {
+    INIT,
+    PURCHASE,
+    CONSUME,
+    GET_PURCHASES,
+}
 
 public class OneStorePlugin extends CordovaPlugin {
-    private CallbackContext context;
-
     PurchaseClient mPurchaseClient = null;
-    int IAP_API_VERSION = 5;
-    int LOGIN_REQUEST_CODE = 1001;
-    int PURCHASE_REQUEST_CODE = 2001;
+    ConsumeListener mConsumeListener = null;
     String TAG = "ONESTORE_TEST";
+
+    String publicKey = "";
 
     Activity mAct;
 
-    CallbackContext cbScope;
+    private CallbackContext purchaseContext;
+    private CallbackContext consumeContext;
+    private CallbackContext initContext;
 
-
-    public String generatePayload() {
-        char[] payload;
-        final char[] specials = {'~', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '-', '{', '}', '|', '\\', '/', '.',
-                '.', '=', '[', ']', '?', '<', '>'};
-        StringBuilder buffer = new StringBuilder();
-        for (char ch = '0'; ch <= '9'; ++ch) {
-            buffer.append(ch);
-        }
-        for (char ch = 'a'; ch <= 'z'; ++ch) {
-            buffer.append(ch);
-        }
-        for (char ch = 'A'; ch <= 'Z'; ++ch) {
-            buffer.append(ch);
-        }
-
-        for (char ch : specials) {
-            buffer.append(ch);
-        }
-
-        payload = buffer.toString().toCharArray();
-
-        StringBuilder randomString = new StringBuilder();
-        Random random = new Random();
-
-        for (int i = 0; i < 20; i++) {
-            randomString.append(payload[random.nextInt(payload.length)]);
-        }
-
-        return randomString.toString();
-    }
+    private CallbackContext loadPurchasesContext;
 
     public void getAct() {
         cordova.setActivityResultCallback(this); // Required
         mAct = this.cordova.getActivity();
     }
 
-    public void init(String publicKey, CallbackContext callbackContext) {
-        if(mPurchaseClient == null) {
-            getAct();
-            mPurchaseClient = new PurchaseClient(mAct, publicKey);
-        }
+    public void init(String pk, CallbackContext callbackContext) {
+        initContext = callbackContext;
 
-        mPurchaseClient.connect(new PurchaseClient.ServiceConnectionListener() {
+        publicKey = pk;
+
+        PurchaseClientStateListener purchaseClientStateListener = new PurchaseClientStateListener() {
             @Override
-            public void onConnected() {
-                mPurchaseClient.isBillingSupportedAsync(IAP_API_VERSION, new PurchaseClient.BillingSupportedListener() {
-                    @Override
-                    public void onSuccess() {
-                        // 然后通过对托管商品和每月采购历史记录的呼叫接收采购历史记录信息。
-                        Log.v(TAG, "isBillingSupportedAsync : RESULT_BILLING_OK");
-                        loadPurchases();
-                        callbackContext.success();
+            public void onSetupFinished(IapResult iapResult) {
+                if (iapResult.isSuccess()) {
+                    //loadPurchases();
+                    if (initContext != null) {
+                        initContext.success(0);
+                        initContext = null;
+                    }
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_UPDATE) {
+                    mPurchaseClient.launchUpdateOrInstallFlow(mAct, null);
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_LOGIN) {
+                    if (initContext != null) {
+                        initContext.success(iapResult.getResponseCode());
+                        initContext = null;
                     }
 
-                    @Override
-                    public void onError(IapResult result) {
-                        Log.e(TAG, "isBillingSupportedAsync onError, " + result.toString());
-                        callbackContext.error("ONE isBillingSupportedAsync onError!!! " + result.toString());
+                    getAct();
+                    GaaSignInClient signInClient = GaaSignInClient.getClient(mAct);
+                    signInClient.launchSignInFlow(mAct, new OnAuthListener() {
+                        @Override
+                        public void onResponse(@NonNull SignInResult signInResult) {
+                            int code = signInResult.getCode();
+                            String message = signInResult.getMessage();
+                            Log.i(TAG, "Code: " + code + "; Message: " + message);
+                        }
+                    });
 
-                        // RESULT_NEED_LOGIN 에러시에 개발사의 애플리키에션 life cycle에 맞춰 명시적으로 원스토어 로그인을 호출합니다.
-                        if (IapResult.RESULT_NEED_LOGIN == result) {
-                            Log.e(TAG, "Try Login 尝试登录");
-                            if (mPurchaseClient.launchLoginFlowAsync(IAP_API_VERSION, mAct, LOGIN_REQUEST_CODE, mLoginFlowListener) == false) {
-                                // listener is null
+                } else {
+                    Log.e(TAG, "Code: " + iapResult.getResponseCode() + "; msg: " + iapResult.getMessage());
+                    if (initContext != null) {
+                        initContext.error(iapResult.getMessage());
+                        initContext = null;
+                    }
+                }
+            }
+
+            @Override
+            public void onServiceDisconnected() {
+                Log.e(TAG, "ONE store service disconnected!");
+            }
+        };
+
+        IapResultListener updateOrInstallFlowListener = new IapResultListener() {
+            @Override
+            public void onResponse(IapResult iapResult) {
+                if (iapResult.isSuccess()) {
+                    Log.i(TAG, "launchUpdateOrInstallFlow was successful");
+                    mPurchaseClient.startConnection(purchaseClientStateListener);
+                } else {
+                    Log.i(TAG, "launchUpdateOrInstallFlow failed: " + iapResult.getMessage() + " ;code: " + iapResult.getResponseCode());
+                }
+            }
+        };
+
+
+        PurchasesUpdatedListener purchasesUpdatedListener = new PurchasesUpdatedListener() {
+            @Override
+            public void onPurchasesUpdated(IapResult iapResult, List<PurchaseData> purchases) {
+                if (iapResult.isSuccess() && purchases != null) {
+                    for (PurchaseData purchase : purchases) {
+                        Log.d(TAG, "successful onPurchasesUpdated; product: " + purchase.getProductId());
+                        //consumeItem(purchase);
+
+                        if (purchaseContext != null) {
+                            boolean isValidPurchase = Security.verifyPurchase(publicKey, purchase.getOriginalJson(), purchase.getSignature());
+
+                            if (!isValidPurchase) {
+                                purchaseContext.error("invalid purchase");
+                                purchaseContext = null;
+                                return;
                             }
+
+                            purchaseContext.success(purchase.getOriginalJson());
+                            purchaseContext = null;
                         }
                     }
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_UPDATE) {
+                    mPurchaseClient.launchUpdateOrInstallFlow(mAct, updateOrInstallFlowListener);
+                } else if (iapResult.getResponseCode() == PurchaseClient.ResponseCode.RESULT_NEED_LOGIN) {
+                    mPurchaseClient.launchLoginFlowAsync(mAct,
+                            iap -> Log.d(TAG, "onResponse of IapResultListener: " + iap.getMessage() + " ;code: " + iap.getResponseCode()));
+                } else {
+                    Log.e(TAG, "one store onPurchasesUpdate response msg: " + iapResult.getMessage() + "; code: " + iapResult.getResponseCode());
+                }
 
-                    @Override
-                    public void onErrorRemoteException() {
-                        Log.e(TAG, "isBillingSupportedAsync onErrorRemoteException, 원스토어 서비스와 연결을 할 수 없습니다");
-                        callbackContext.error("onErrorRemoteException");
-                    }
 
-                    @Override
-                    public void onErrorSecurityException() {
-                        Log.e(TAG, "isBillingSupportedAsync onErrorSecurityException, 비정상 앱에서 결제가 요청되었습니다");
-                        callbackContext.error("onErrorSecurityException");
-                    }
+                if (purchaseContext != null) {
+                    purchaseContext.error("error:" + iapResult.getMessage());
+                    purchaseContext = null;
+                }
+            }
+        };
 
-                    @Override
-                    public void onErrorNeedUpdateException() {
-                        Log.e(TAG, "isBillingSupportedAsync onErrorNeedUpdateException, 원스토어 서비스앱의 업데이트가 필요합니다");
-                        callbackContext.error("onErrorNeedUpdateException");
-                    }
-                });
 
+        if (mPurchaseClient == null) {
+            getAct();
+
+            mPurchaseClient = PurchaseClient.newBuilder(mAct).setBase64PublicKey(publicKey).setListener(purchasesUpdatedListener).build();
+        }
+
+
+
+        mConsumeListener = (iapResult, purchaseData) -> {
+            if (iapResult.isFailure()) {
+                if (consumeContext != null) {
+                    consumeContext.error(iapResult.getMessage());
+                    consumeContext = null;
+                }
+                return;
             }
 
-            @Override
-            public void onDisconnected() {
-                Log.v("ONESTORE_TEST", "ONE store Disconnected!!!");
-                callbackContext.error("ONE store Disconnected!!!");
-
+            Log.d(TAG, "TODO consumeAsync onSuccess, " + purchaseData.toString());
+            if (consumeContext != null) {
+                String test = purchaseData.getOriginalJson();
+                consumeContext.success(test);
+                consumeContext = null;
             }
 
-            @Override
-            public void onErrorNeedUpdateException() {//必须更新到最新的onestore客户端后才能进行支付
-                Log.v("ONESTORE_TEST", "ONE store NEED_UPDATE!!!");
-                callbackContext.error("ONE store NEED_UPDATE!!!");
-            }
+        };
+
+        mPurchaseClient.startConnection(purchaseClientStateListener);
+    }
+
+    public void purchase(String purchasePayload, String productId, CallbackContext callbackContext) {
+        purchaseContext = callbackContext;
+
+        cordova.getActivity().runOnUiThread(() -> {
+            PurchaseFlowParams purchaseFlowParams = PurchaseFlowParams.newBuilder()
+                    .setProductType(ProductType.INAPP)
+                    .setProductId(productId)
+                    .setDeveloperPayload(purchasePayload)
+                    .setQuantity(1)
+                    .build();
+
+            mPurchaseClient.launchPurchaseFlow(cordova.getActivity(), purchaseFlowParams);
         });
-
     }
 
-    public void purchase(String userID, String productId, CallbackContext callbackContext) {
-        cbScope = callbackContext;
-        getAct();
-        mPurchaseClient.launchPurchaseFlowAsync(IAP_API_VERSION,
-            mAct, PURCHASE_REQUEST_CODE, productId, userID,
-            IapEnum.ProductType.IN_APP.getType(), generatePayload(), "",
-            false, new PurchaseClient.PurchaseFlowListener() {
-                @Override
-                public void onSuccess(PurchaseData purchaseData) {
-                    Log.e(TAG, "launchPurchaseFlowAsy Success!");
-                    consumeItem(purchaseData);
-                    // callbackContext.success(purchaseData);
-                }
+    public void consume(String rawPurchasesData, CallbackContext callbackContext) {
+        consumeContext = callbackContext;
 
-                @Override
-                public void onError(IapResult result) {
-                    Log.e(TAG, "launchPurchaseFlowAsync onError, " + result.toString());
-                    callbackContext.error(result.toString());
-                }
+        PurchaseData purchaseData = new PurchaseData(rawPurchasesData);
 
-                @Override
-                public void onErrorRemoteException() {
-                    Log.e(TAG, "launchPurchaseFlowAsync onError=====onErrorRemoteException");
-                    callbackContext.error("onErrorRemoteException");
-                }
-
-                @Override
-                public void onErrorSecurityException() {
-                    Log.e(TAG, "launchPurchaseFlowAsync onError=====onErrorSecurityException");
-                    callbackContext.error("onErrorSecurityException");
-                }
-
-                @Override
-                public void onErrorNeedUpdateException() {
-                    Log.e(TAG, "launchPurchaseFlowAsync onError=====onErrorNeedUpdateException");
-                    callbackContext.error("onErrorNeedUpdateException");
-                }
-            }
-        );
+        consumeItem(purchaseData);
     }
-
-
-    // NOTE: 登录判断
-    /*
-    * PurchaseClient의 launchLoginFlowAsync API (로그인) 콜백 리스너
-    */
-    PurchaseClient.LoginFlowListener mLoginFlowListener = new PurchaseClient.LoginFlowListener() {
-        @Override
-        public void onSuccess() {
-            Log.d(TAG, "launchLoginFlowAsync onSuccess");
-        }
-
-        @Override
-        public void onError(IapResult result) {
-            Log.e(TAG, "launchLoginFlowAsync onError, " + result.toString());
-        }
-
-        @Override
-        public void onErrorRemoteException() {
-            Log.e(TAG, "launchLoginFlowAsync onError, 원스토어 서비스와 연결을 할 수 없습니다");
-        }
-
-        @Override
-        public void onErrorSecurityException() {
-            Log.e(TAG, "launchLoginFlowAsync onError, 비정상 앱에서 결제가 요청되었습니다");
-        }
-
-        @Override
-        public void onErrorNeedUpdateException() {
-            Log.e(TAG, "launchLoginFlowAsync onError, 원스토어 서비스앱의 업데이트가 필요합니다");
-        }
-    };
-
 
     @Override
-    public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-        this.context = callbackContext;
-        if(action.equals("init")) {
-            String publicKey = args.getString(0);
-            init(publicKey, callbackContext);
-            return true;
-        } else if(action.equals("purchase")) {
-            String uid = args.getString(0);
-            String pid = args.getString(1);
-            purchase(uid, pid, callbackContext);
-            return true;
-        } else {
+    public boolean execute(String actionStr, JSONArray args, CallbackContext callbackContext) throws JSONException {
+        try {
+            PluginAction action = PluginAction.valueOf(actionStr.toUpperCase(Locale.ENGLISH));
 
-            return false;
+            switch (action) {
+                case INIT: {
+                    String publicKey = args.getString(0);
+                    init(publicKey, callbackContext);
+                    return true;
+                }
+                case PURCHASE: {
+                    String purchasePayload = args.getString(0);
+                    String productId = args.getString(1);
 
-        }
-
-    }
-
-    private void loadPurchases() {
-        Log.d("ONESTORE_TEST", "loadPurchases()");
-        loadPurchase(IapEnum.ProductType.IN_APP);
-        loadPurchase(IapEnum.ProductType.AUTO);
-    }
-
-
-    /*
-     * PurchaseClient의 consumeAsync API (상품소비) 콜백 리스너
-     */
-    PurchaseClient.ConsumeListener mConsumeListener = new PurchaseClient.ConsumeListener() {
-        @Override
-        public void onSuccess(PurchaseData purchaseData) {
-            Log.d(TAG, "TODO consumeAsync onSuccess, " + purchaseData.toString());
-            if(cbScope != null) {
-                // cbScope.success(purchaseData.toString());
-                cbScope.success(purchaseData.getPurchaseData());
-
-                cbScope = null;
+                    purchase(purchasePayload, productId, callbackContext);
+                    return true;
+                }
+                case CONSUME: {
+                    String purchaseData = args.getString(0);
+                    consume(purchaseData, callbackContext);
+                    return true;
+                }
+                case GET_PURCHASES:
+                    loadPurchases(callbackContext);
+                    return true;
             }
+        } catch (IllegalArgumentException ex) {
+            callbackContext.error("unsupported action: " + actionStr);
+            return false;
         }
 
-        @Override
-        public void onErrorRemoteException() {
-            Log.e(TAG, "consumeAsync onError, 원스토어 서비스와 연결을 할 수 없습니다");
-        }
+        return false;
+    }
 
-        @Override
-        public void onErrorSecurityException() {
-            Log.e(TAG, "consumeAsync onError, 비정상 앱에서 결제가 요청되었습니다");
-        }
+    private void loadPurchases(CallbackContext callbackContext) {
+        loadPurchasesContext = callbackContext;
 
-        @Override
-        public void onErrorNeedUpdateException() {
-            Log.e(TAG, "consumeAsync onError, 원스토어 서비스앱의 업데이트가 필요합니다");
-        }
+        Log.d(TAG, "loadPurchases()");
+        loadPurchase(ProductType.INAPP);
+    }
 
-        @Override
-        public void onError(IapResult result) {
-            Log.e(TAG, "consumeAsync onError, " + result.toString());
-        }
-    };
-
-
-
-    // 구매내역조회에서 받아온 관리형상품(inapp)의 경우 Signature 검증을 진행하고, 성공할 경우 상품소비를 진행합니다.
     private void onLoadPurchaseInApp(List<PurchaseData> purchaseDataList) {
         Log.i(TAG, "onLoadPurchaseInApp() :: purchaseDataList - " + purchaseDataList.toString());
 
-        for (PurchaseData purchaseData : purchaseDataList) {
-            // boolean result = AppSecurity.verifyPurchase(purchase.getPurchaseData(), purchase.getSignature());
+        JsonArray purchasesToSync = new JsonArray();
 
-            // if (result) {
-                consumeItem(purchaseData);
-            // }
+        for (PurchaseData purchaseData : purchaseDataList) {
+            if (purchaseData.getPurchaseState() == PurchaseData.PurchaseState.PURCHASED) {
+                JsonObject parsed = JsonParser.parseString(purchaseData.getOriginalJson()).getAsJsonObject();
+                purchasesToSync.add(parsed);
+            }
+        }
+
+        if (loadPurchasesContext != null) {
+            String output = purchasesToSync.toString();
+            loadPurchasesContext.success(output);
+            loadPurchasesContext = null;
         }
     }
-    // 관리형상품(inapp)의 구매완료 이후 또는 구매내역조회 이후 소비되지 않는 관리형상품에 대해서 소비를 진행합니다.
+
     private void consumeItem(final PurchaseData purchaseData) {
-        Log.e(TAG, "consumeItem() :: getProductId - " + purchaseData.getProductId() + " getPurchaseId -" + purchaseData.getPurchaseId());
+        ConsumeParams consumeParams = ConsumeParams.newBuilder()
+                .setPurchaseData(purchaseData)
+                .build();
+
+
+        Log.e(TAG, "consumeItem() :: productId - " + purchaseData.getProductId() + " orderId -" + purchaseData.getOrderId());
 
         if (mPurchaseClient == null) {
             Log.d(TAG, "PurchaseClient is not initialized");
             return;
         }
 
-        mPurchaseClient.consumeAsync(IAP_API_VERSION, purchaseData, mConsumeListener);
+        mPurchaseClient.consumeAsync(consumeParams, mConsumeListener);
     }
-    /*
-     * PurchaseClient의 queryPurchasesAsync API (구매내역조회) 콜백 리스너
-     */
-    PurchaseClient.QueryPurchaseListener mQueryPurchaseListener = new PurchaseClient.QueryPurchaseListener() {
-        @Override
-        public void onSuccess(List<PurchaseData> purchaseDataList, String productType) {
-            Log.d(TAG, "queryPurchasesAsync onSuccess, " + purchaseDataList.toString());
 
-            if (IapEnum.ProductType.IN_APP.getType().equalsIgnoreCase(productType)) {
-                onLoadPurchaseInApp(purchaseDataList);
-                Log.i(TAG, "onLoadPurchaseAuto() :: IN_APP purchaseDataList - " + purchaseDataList.toString());
-
-            } else if (IapEnum.ProductType.AUTO.getType().equalsIgnoreCase(productType)) {
-                Log.i(TAG, "onLoadPurchaseAuto() :: AUTO purchaseDataList - " + purchaseDataList.toString());
-
-            }
+    QueryPurchasesListener mQueryPurchaseListener = (iapResult, list) -> {
+        if (iapResult.isFailure()) {
+            Log.d(TAG, "onPurchasesResponse failed: " + iapResult.getMessage());
+            return;
         }
 
-        @Override
-        public void onErrorRemoteException() {
-            Log.e(TAG, "queryPurchasesAsync onError, 원스토어 서비스와 연결을 할 수 없습니다");
+        if (list == null) {
+            Log.d(TAG, "empty purchasesData list in onPurchasesResponse");
+            return;
         }
 
-        @Override
-        public void onErrorSecurityException() {
-            Log.e(TAG, "queryPurchasesAsync onError, 비정상 앱에서 결제가 요청되었습니다");
-        }
-
-        @Override
-        public void onErrorNeedUpdateException() {
-            Log.e(TAG, "queryPurchasesAsync onError, 원스토어 서비스앱의 업데이트가 필요합니다");
-        }
-
-        @Override
-        public void onError(IapResult result) {
-            Log.e(TAG, "queryPurchasesAsync onError, " + result.toString());
-        }
+        Log.d(TAG, "queryPurchasesAsync onSuccess, " + list);
+        onLoadPurchaseInApp(list);
     };
 
-    private void loadPurchase(final IapEnum.ProductType productType) {
-        Log.i(TAG, "loadPurchase() :: productType - " + productType.getType());
-        mPurchaseClient.queryPurchasesAsync(IAP_API_VERSION, productType.getType(), mQueryPurchaseListener);
+    private void loadPurchase(String productType) {
+        Log.i(TAG, "loadPurchase() :: productType - " + productType);
+
+        mPurchaseClient.queryPurchasesAsync(productType, mQueryPurchaseListener);
     }
-
-    @Override public void onActivityResult(int requestCode, int resultCode, Intent intent) {
-        // 根据resultCode判断处理结果
-        Log.e("ONESTORE_TEST", "onActivityResult resultCode " + resultCode);
-
-        if(requestCode == PURCHASE_REQUEST_CODE)
-        {
-            /*
-             * launchPurchaseFlowAsync API 호출 시 전달받은 intent 데이터를 handlePurchaseData를 통하여 응답값을 파싱합니다.
-             * 파싱 이후 응답 결과를 launchPurchaseFlowAsync 호출 시 넘겨준 PurchaseFlowListener 를 통하여 전달합니다.
-             */
-
-            if (resultCode == Activity.RESULT_OK) {
-                if (mPurchaseClient.handlePurchaseData(intent) == false) {
-                    Log.e(TAG, "onActivityResult handlePurchaseData false ");
-                    // listener is null
-                }
-            } else {
-                // if(cbScope != null) {
-                //     cbScope.error(resultCode);
-                // }
-                Log.e(TAG, "onActivityResult user canceled");
-
-                // user canceled , do nothing..
-            }
-        }else
-
-        if(resultCode== Activity.RESULT_OK){
-            String spot=intent.getStringExtra("spot");
-//            context.success(spot);
-        }
-    }
-
-
 
 }
