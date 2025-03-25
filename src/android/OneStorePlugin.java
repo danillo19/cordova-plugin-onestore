@@ -12,6 +12,9 @@ import com.gaa.sdk.iap.ConsumeListener;
 import com.gaa.sdk.iap.ConsumeParams;
 import com.gaa.sdk.iap.IapResult;
 import com.gaa.sdk.iap.IapResultListener;
+import com.gaa.sdk.iap.ProductDetail;
+import com.gaa.sdk.iap.ProductDetailsListener;
+import com.gaa.sdk.iap.ProductDetailsParams;
 import com.gaa.sdk.iap.PurchaseClient;
 import com.gaa.sdk.iap.PurchaseClient.ProductType;
 import com.gaa.sdk.iap.PurchaseClientStateListener;
@@ -29,6 +32,7 @@ import org.apache.cordova.CordovaPlugin;
 import org.json.JSONArray;
 import org.json.JSONException;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -37,6 +41,7 @@ enum PluginAction {
     PURCHASE,
     CONSUME,
     GET_PURCHASES,
+    GET_PRODUCTS,
 }
 
 public class OneStorePlugin extends CordovaPlugin {
@@ -53,6 +58,8 @@ public class OneStorePlugin extends CordovaPlugin {
     private CallbackContext initContext;
 
     private CallbackContext loadPurchasesContext;
+
+    private CallbackContext loadProductsContext;
 
     public void getAct() {
         cordova.setActivityResultCallback(this); // Required
@@ -166,7 +173,6 @@ public class OneStorePlugin extends CordovaPlugin {
         }
 
 
-
         mConsumeListener = (iapResult, purchaseData) -> {
             if (iapResult.isFailure()) {
                 if (consumeContext != null) {
@@ -237,6 +243,15 @@ public class OneStorePlugin extends CordovaPlugin {
                 case GET_PURCHASES:
                     loadPurchases(callbackContext);
                     return true;
+                case GET_PRODUCTS:
+                    JSONArray productsIdsJson = args.getJSONArray(0);
+                    List<String> productIds = new ArrayList<>(productsIdsJson.length());
+                    
+                    for (int i = 0;i < productsIdsJson.length();i++) {
+                        productIds.add(productsIdsJson.getString(i));
+                    }
+                    
+                    loadProducts(callbackContext, productIds);
             }
         } catch (IllegalArgumentException ex) {
             callbackContext.error("unsupported action: " + actionStr);
@@ -244,6 +259,30 @@ public class OneStorePlugin extends CordovaPlugin {
         }
 
         return false;
+    }
+
+    private void loadProducts(CallbackContext callbackContext, List<String> productsIds) {
+        loadProductsContext = callbackContext;
+
+        ProductDetailsParams params = ProductDetailsParams.newBuilder()
+                .setProductIdList(productsIds)
+                .setProductType(ProductType.INAPP)
+                .build();
+
+        mPurchaseClient.queryProductDetailsAsync(params, (iapResult, productsList) -> {
+            JsonArray productsSerialized = new JsonArray();
+
+            for (ProductDetail productDetail : productsList) {
+                JsonObject parsed = JsonParser.parseString(productDetail.getOriginalJson()).getAsJsonObject();
+                productsSerialized.add(parsed);
+            }
+
+            if (loadProductsContext != null) {
+                String output = productsSerialized.toString();
+                loadProductsContext.success(output);
+                loadProductsContext = null;
+            }
+        });
     }
 
     private void loadPurchases(CallbackContext callbackContext) {

@@ -14,5 +14,9 @@ module.exports = {
     getPurchases: function(successCallback, errorCallback) {
         cordova.exec(successCallback, errorCallback, "OneStorePlugin", "get_purchases", []);
     },
+
+    getProducts: function(productsIds, successCallback, errorCallback) {
+        cordova.exec(successCallback, errorCallback, "OneStorePlugin", "get_products", [productsIds]);
+    }
     
 };
