@@ -252,6 +252,7 @@ public class OneStorePlugin extends CordovaPlugin {
                     }
                     
                     loadProducts(callbackContext, productIds);
+                    return true;
             }
         } catch (IllegalArgumentException ex) {
             callbackContext.error("unsupported action: " + actionStr);
@@ -270,6 +271,15 @@ public class OneStorePlugin extends CordovaPlugin {
                 .build();
 
         mPurchaseClient.queryProductDetailsAsync(params, (iapResult, productsList) -> {
+            if (iapResult.isFailure()) {
+                if (loadProductsContext != null) {
+                    loadProductsContext.error(iapResult.getMessage());
+                    loadProductsContext = null;
+                }
+
+                return;
+            }
+
             JsonArray productsSerialized = new JsonArray();
 
             for (ProductDetail productDetail : productsList) {
